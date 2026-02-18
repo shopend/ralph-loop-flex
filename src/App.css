@@ -18,6 +18,8 @@
   --success-dim: rgba(34,197,94,0.12);
   --warning: #f59e0b;
   --warning-dim: rgba(245,158,11,0.12);
+  --danger: #ef4444;
+  --danger-dim: rgba(239,68,68,0.12);
   --radius: 12px;
   --radius-sm: 8px;
 }
@@ -55,12 +57,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-shrink: 0;
 }
 
 .logo {
@@ -75,7 +79,13 @@ body {
 .logo-icon {
   font-size: 20px;
   color: var(--accent);
-  animation: spin 4s linear infinite;
+  display: inline-block;
+  transition: color 0.2s;
+}
+
+.logo-icon.spinning {
+  animation: spin 1.2s linear infinite;
+  color: var(--accent);
 }
 
 @keyframes spin {
@@ -101,9 +111,111 @@ body {
   font-style: normal;
 }
 
+/* ---- Controls (center) ---- */
+.header-center {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctrl-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.01em;
+}
+
+.ctrl-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ctrl-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ctrl-play {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.ctrl-play:not(:disabled):hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.ctrl-stop {
+  background: var(--danger-dim);
+  color: var(--danger);
+  border-color: rgba(239,68,68,0.35);
+}
+
+.ctrl-stop:hover {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.ctrl-reset {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+
+.ctrl-reset:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border-color: #3a4060;
+}
+
+/* ---- Running indicator ---- */
+.running-indicator {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+.running-label {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ---- Header right ---- */
 .header-right {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .progress-info {
@@ -181,6 +293,15 @@ body {
   .stories-grid {
     grid-template-columns: 1fr;
   }
+  .header-inner {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 12px 16px;
+    gap: 12px;
+  }
+  .progress-bar-wrap {
+    width: 80px;
+  }
 }
 
 /* ---- Story Card ---- */
@@ -191,6 +312,7 @@ body {
   padding: 20px;
   transition: border-color 0.2s, transform 0.15s;
   position: relative;
+  overflow: hidden;
 }
 
 .story-card:hover {
@@ -206,6 +328,34 @@ body {
 .story-card.next {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent), 0 4px 20px rgba(59,130,246,0.15);
+}
+
+.story-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 4px 24px rgba(59,130,246,0.2);
+}
+
+/* ---- Working progress bar at top of card ---- */
+.working-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(59,130,246,0.15);
+  overflow: hidden;
+}
+
+.working-bar-fill {
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-150%); }
+  100% { transform: translateX(350%); }
 }
 
 .story-header {
@@ -250,6 +400,18 @@ body {
   background: var(--accent-dim);
   color: var(--accent);
   border: 1px solid rgba(59,130,246,0.3);
+}
+
+.badge-working {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid rgba(59,130,246,0.3);
+  animation: badge-blink 1.4s ease-in-out infinite;
+}
+
+@keyframes badge-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .badge-pending {

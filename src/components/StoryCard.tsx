@@ -3,17 +3,26 @@ import type { UserStory } from '../types';
 interface StoryCardProps {
   story: UserStory;
   isNext: boolean;
+  isRunning: boolean;
   onToggle: (id: string) => void;
 }
 
-export function StoryCard({ story, isNext, onToggle }: StoryCardProps) {
+export function StoryCard({ story, isNext, isRunning, onToggle }: StoryCardProps) {
+  const isActive = isNext && isRunning;
+
   return (
-    <div className={`story-card ${story.passes ? 'passes' : ''} ${isNext ? 'next' : ''}`}>
+    <div className={`story-card ${story.passes ? 'passes' : ''} ${isNext ? 'next' : ''} ${isActive ? 'active' : ''}`}>
+      {isActive && (
+        <div className="working-bar">
+          <div className="working-bar-fill" />
+        </div>
+      )}
+
       <div className="story-header">
         <div className="story-meta">
           <span className="story-id">{story.id}</span>
-          <span className={`story-badge ${story.passes ? 'badge-pass' : isNext ? 'badge-next' : 'badge-pending'}`}>
-            {story.passes ? 'Passed' : isNext ? 'Up Next' : 'Pending'}
+          <span className={`story-badge ${story.passes ? 'badge-pass' : isNext ? (isRunning ? 'badge-working' : 'badge-next') : 'badge-pending'}`}>
+            {story.passes ? 'Passed' : isNext ? (isRunning ? 'Working...' : 'Up Next') : 'Pending'}
           </span>
         </div>
         <button
