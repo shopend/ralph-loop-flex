@@ -17,6 +17,23 @@ function err(msg: string, status = 400) {
   return json({ error: msg }, status);
 }
 
+const ALLOWED_MODELS = [
+  "claude-opus-4-5",
+  "claude-sonnet-4-5",
+  "claude-haiku-4-5",
+  "claude-opus-4",
+  "claude-sonnet-4",
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-4-turbo",
+  "o1",
+  "o1-mini",
+  "gemini-2.0-flash",
+  "gemini-1.5-pro",
+];
+
+const ALLOWED_PATTERNS = ["edit_existing", "generate_new"];
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -30,33 +47,62 @@ Deno.serve(async (req: Request) => {
 
     const url = new URL(req.url);
     const parts = url.pathname.replace(/^\/ralph-api\/?/, "").split("/").filter(Boolean);
-    // routes:
-    //   POST   /ralph-api/runs              → create run
-    //   GET    /ralph-api/runs/:id          → get run + stories
-    //   PATCH  /ralph-api/runs/:id          → update run status
-    //   PATCH  /ralph-api/runs/:id/stories/:storyId  → mark story passes/notes
-    //   GET    /ralph-api/runs/:id/next     → get next pending story
-
     const method = req.method;
     const ralphKey = req.headers.get("x-ralph-key") ?? "";
 
     // ── POST /runs ──────────────────────────────────────────────────────────
     if (method === "POST" && parts[0] === "runs" && parts.length === 1) {
       const body = await req.json();
-      const { prd, api_key } = body as {
-        prd: { branchName: string; userStories: Array<{ id: string; title: string; acceptanceCriteria: string[]; priority: number; passes?: boolean; notes?: string }> };
+      const { prd, api_key, config } = body as {
+        prd: {
+          branchName: string;
+          userStories: Array<{
+            id: string;
+            title: string;
+            acceptanceCriteria: string[];
+            priority: number;
+            passes?: boolean;
+            notes?: string;
+          }>;
+        };
         api_key?: string;
+        config?: {
+          system_prompt?: string;
+          model?: string;
+          goal?: string;
+          generation_pattern?: string;
+          story_order?: string[];
+        };
       };
 
       if (!prd?.branchName || !Array.isArray(prd?.userStories)) {
         return err("prd.branchName and prd.userStories are required");
       }
 
+      const model = config?.model ?? "claude-opus-4-5";
+      if (!ALLOWED_MODELS.includes(model)) {
+        return err(`model must be one of: ${ALLOWED_MODELS.join(", ")}`);
+      }
+
+      const pattern = config?.generation_pattern ?? "edit_existing";
+      if (!ALLOWED_PATTERNS.includes(pattern)) {
+        return err(`generation_pattern must be one of: ${ALLOWED_PATTERNS.join(", ")}`);
+      }
+
       const key = api_key || crypto.randomUUID();
 
       const { data: run, error: runErr } = await supabase
         .from("ralph_runs")
-        .insert({ branch_name: prd.branchName, status: "pending", api_key: key })
+        .insert({
+          branch_name: prd.branchName,
+          status: "pending",
+          api_key: key,
+          system_prompt: config?.system_prompt ?? "",
+          model,
+          goal: config?.goal ?? "",
+          generation_pattern: pattern,
+          story_order: config?.story_order ?? [],
+        })
         .select()
         .single();
 
@@ -75,7 +121,7 @@ Deno.serve(async (req: Request) => {
       const { error: storiesErr } = await supabase.from("ralph_stories").insert(stories);
       if (storiesErr) return err(storiesErr.message, 500);
 
-      return json({ run_id: run.id, api_key: key, status: run.status }, 201);
+      return json({ run_id: run.id, api_key: key, status: run.status, config: { model, generation_pattern: pattern, goal: config?.goal ?? "", system_prompt: config?.system_prompt ?? "", story_order: config?.story_order ?? [] } }, 201);
     }
 
     // ── GET /runs/:id ────────────────────────────────────────────────────────
@@ -92,13 +138,29 @@ Deno.serve(async (req: Request) => {
       if (runErr) return err(runErr.message, 500);
       if (!run) return err("Run not found or invalid api_key", 404);
 
-      const { data: stories, error: stErr } = await supabase
+      let storiesQuery = supabase
         .from("ralph_stories")
         .select("*")
-        .eq("run_id", runId)
-        .order("priority", { ascending: true });
+        .eq("run_id", runId);
 
+      const storyOrder: string[] = run.story_order ?? [];
+      if (storyOrder.length > 0) {
+        storiesQuery = storiesQuery.order("story_id");
+      } else {
+        storiesQuery = storiesQuery.order("priority", { ascending: true });
+      }
+
+      const { data: rawStories, error: stErr } = await storiesQuery;
       if (stErr) return err(stErr.message, 500);
+
+      let stories = rawStories ?? [];
+      if (storyOrder.length > 0) {
+        stories = stories.sort((a, b) => {
+          const ai = storyOrder.indexOf(a.story_id);
+          const bi = storyOrder.indexOf(b.story_id);
+          return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
+        });
+      }
 
       return json({
         id: run.id,
@@ -106,7 +168,14 @@ Deno.serve(async (req: Request) => {
         status: run.status,
         created_at: run.created_at,
         updated_at: run.updated_at,
-        stories: stories?.map(s => ({
+        config: {
+          system_prompt: run.system_prompt,
+          model: run.model,
+          goal: run.goal,
+          generation_pattern: run.generation_pattern,
+          story_order: run.story_order,
+        },
+        stories: stories.map(s => ({
           id: s.story_id,
           title: s.title,
           acceptanceCriteria: s.acceptance_criteria,
@@ -123,27 +192,52 @@ Deno.serve(async (req: Request) => {
 
       const { data: run } = await supabase
         .from("ralph_runs")
-        .select("id")
+        .select("*")
         .eq("id", runId)
         .eq("api_key", ralphKey)
         .maybeSingle();
 
       if (!run) return err("Run not found or invalid api_key", 404);
 
-      const { data: story, error: stErr } = await supabase
-        .from("ralph_stories")
-        .select("*")
-        .eq("run_id", runId)
-        .eq("passes", false)
-        .order("priority", { ascending: true })
-        .limit(1)
-        .maybeSingle();
+      const storyOrder: string[] = run.story_order ?? [];
+      let story = null;
 
-      if (stErr) return err(stErr.message, 500);
+      if (storyOrder.length > 0) {
+        const { data: allStories } = await supabase
+          .from("ralph_stories")
+          .select("*")
+          .eq("run_id", runId)
+          .eq("passes", false);
+
+        const pending = (allStories ?? []).sort((a, b) => {
+          const ai = storyOrder.indexOf(a.story_id);
+          const bi = storyOrder.indexOf(b.story_id);
+          return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
+        });
+        story = pending[0] ?? null;
+      } else {
+        const { data, error: stErr } = await supabase
+          .from("ralph_stories")
+          .select("*")
+          .eq("run_id", runId)
+          .eq("passes", false)
+          .order("priority", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (stErr) return err(stErr.message, 500);
+        story = data;
+      }
+
       if (!story) return json({ complete: true });
 
       return json({
         complete: false,
+        config: {
+          system_prompt: run.system_prompt,
+          model: run.model,
+          goal: run.goal,
+          generation_pattern: run.generation_pattern,
+        },
         story: {
           id: story.story_id,
           title: story.title,
@@ -158,12 +252,14 @@ Deno.serve(async (req: Request) => {
     // ── PATCH /runs/:id ──────────────────────────────────────────────────────
     if (method === "PATCH" && parts[0] === "runs" && parts.length === 2) {
       const runId = parts[1];
-      const body = await req.json() as { status?: string };
-
-      const allowed = ["pending", "running", "paused", "complete", "failed"];
-      if (body.status && !allowed.includes(body.status)) {
-        return err(`status must be one of: ${allowed.join(", ")}`);
-      }
+      const body = await req.json() as {
+        status?: string;
+        system_prompt?: string;
+        model?: string;
+        goal?: string;
+        generation_pattern?: string;
+        story_order?: string[];
+      };
 
       const { data: run } = await supabase
         .from("ralph_runs")
@@ -174,11 +270,26 @@ Deno.serve(async (req: Request) => {
 
       if (!run) return err("Run not found or invalid api_key", 404);
 
-      const { error: upErr } = await supabase
-        .from("ralph_runs")
-        .update({ status: body.status, updated_at: new Date().toISOString() })
-        .eq("id", runId);
+      const allowed = ["pending", "running", "paused", "complete", "failed"];
+      if (body.status && !allowed.includes(body.status)) {
+        return err(`status must be one of: ${allowed.join(", ")}`);
+      }
+      if (body.model && !ALLOWED_MODELS.includes(body.model)) {
+        return err(`model must be one of: ${ALLOWED_MODELS.join(", ")}`);
+      }
+      if (body.generation_pattern && !ALLOWED_PATTERNS.includes(body.generation_pattern)) {
+        return err(`generation_pattern must be one of: ${ALLOWED_PATTERNS.join(", ")}`);
+      }
 
+      const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (body.status) update.status = body.status;
+      if (body.system_prompt !== undefined) update.system_prompt = body.system_prompt;
+      if (body.model) update.model = body.model;
+      if (body.goal !== undefined) update.goal = body.goal;
+      if (body.generation_pattern) update.generation_pattern = body.generation_pattern;
+      if (body.story_order) update.story_order = body.story_order;
+
+      const { error: upErr } = await supabase.from("ralph_runs").update(update).eq("id", runId);
       if (upErr) return err(upErr.message, 500);
       return json({ ok: true });
     }
@@ -210,7 +321,6 @@ Deno.serve(async (req: Request) => {
 
       if (upErr) return err(upErr.message, 500);
 
-      // auto-complete run if all stories pass
       const { data: pending } = await supabase
         .from("ralph_stories")
         .select("id")
@@ -226,6 +336,11 @@ Deno.serve(async (req: Request) => {
       }
 
       return json({ ok: true });
+    }
+
+    // ── GET /models ──────────────────────────────────────────────────────────
+    if (method === "GET" && parts[0] === "models") {
+      return json({ models: ALLOWED_MODELS });
     }
 
     return err("Not found", 404);

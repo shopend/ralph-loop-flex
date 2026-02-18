@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getRun, updateStory, updateRunStatus } from '../api';
 import { StoryCard } from './StoryCard';
-import type { UserStory } from '../types';
+import type { UserStory, RunConfig } from '../types';
 
 interface LiveRunProps {
   runId: string;
@@ -13,6 +13,7 @@ interface RunData {
   id: string;
   branch_name: string;
   status: string;
+  config: RunConfig;
   stories: UserStory[];
 }
 
@@ -23,6 +24,7 @@ export function LiveRun({ runId, apiKey, onClear }: LiveRunProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isRunning, setIsRunning] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchRun = async () => {
@@ -37,9 +39,7 @@ export function LiveRun({ runId, apiKey, onClear }: LiveRunProps) {
     }
   };
 
-  useEffect(() => {
-    fetchRun();
-  }, []);
+  useEffect(() => { fetchRun(); }, []);
 
   const passed = run?.stories.filter(s => s.passes).length ?? 0;
   const total = run?.stories.length ?? 0;
@@ -80,22 +80,14 @@ export function LiveRun({ runId, apiKey, onClear }: LiveRunProps) {
       intervalRef.current = setInterval(async () => {
         if (!run) return;
         const next = run.stories.find(s => !s.passes);
-        if (!next) {
-          setIsRunning(false);
-          return;
-        }
+        if (!next) { setIsRunning(false); return; }
         await updateStory(runId, apiKey, next.id, { passes: true });
         await fetchRun();
       }, TICK_MS);
     } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
+      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isRunning, allDone, run]);
 
   if (loading) {
@@ -118,6 +110,8 @@ export function LiveRun({ runId, apiKey, onClear }: LiveRunProps) {
 
   if (!run) return null;
 
+  const cfg = run.config;
+
   return (
     <div className="live-run">
       <div className="live-run-header">
@@ -128,7 +122,43 @@ export function LiveRun({ runId, apiKey, onClear }: LiveRunProps) {
           </div>
           <span className="run-id-label">Run: <code>{runId.slice(0, 8)}...</code></span>
           <span className="api-key-label">Key: <code>{apiKey.slice(0, 8)}...</code></span>
+          <button className="config-toggle-btn" onClick={() => setShowConfig(v => !v)}>
+            {showConfig ? 'Hide config' : 'Show config'}
+          </button>
         </div>
+
+        {showConfig && cfg && (
+          <div className="run-config-panel">
+            <div className="config-row">
+              <span className="config-label">Model</span>
+              <span className="config-value config-value--badge">{cfg.model}</span>
+            </div>
+            <div className="config-row">
+              <span className="config-label">Pattern</span>
+              <span className="config-value config-value--badge">
+                {cfg.generation_pattern === 'edit_existing' ? 'Edit existing' : 'Generate new'}
+              </span>
+            </div>
+            {cfg.goal && (
+              <div className="config-row config-row--block">
+                <span className="config-label">Goal</span>
+                <p className="config-value config-value--text">{cfg.goal}</p>
+              </div>
+            )}
+            {cfg.system_prompt && (
+              <div className="config-row config-row--block">
+                <span className="config-label">Prompt</span>
+                <pre className="config-value config-value--pre">{cfg.system_prompt}</pre>
+              </div>
+            )}
+            {cfg.story_order?.length > 0 && (
+              <div className="config-row config-row--block">
+                <span className="config-label">Order</span>
+                <span className="config-value config-value--text">{cfg.story_order.join(' → ')}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="live-run-controls">
           <div className="controls">

@@ -3,23 +3,26 @@ import { Header } from './components/Header';
 import { StoryCard } from './components/StoryCard';
 import { ApiDocs } from './components/ApiDocs';
 import { LiveRun } from './components/LiveRun';
+import { CreateRunWizard } from './components/CreateRunWizard';
 import { prdData } from './data';
 import { createRun } from './api';
-import type { UserStory } from './types';
+import type { UserStory, RunConfig } from './types';
 import './App.css';
 
 const TICK_MS = 2200;
 type Tab = 'demo' | 'api';
+type ApiView = 'docs' | 'wizard' | 'run';
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('demo');
+  const [apiView, setApiView] = useState<ApiView>('docs');
   const [stories, setStories] = useState<UserStory[]>(prdData.userStories);
   const [isRunning, setIsRunning] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [liveRunId, setLiveRunId] = useState('');
   const [liveApiKey, setLiveApiKey] = useState('');
-  const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const passed = stories.filter(s => s.passes).length;
   const nextStory = stories.find(s => !s.passes);
@@ -52,21 +55,24 @@ export default function App() {
     return () => { if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; } };
   }, [isRunning, allDone]);
 
-  const handleCreateDemo = async () => {
-    setCreating(true);
+  const handleWizardSubmit = async (config: RunConfig) => {
+    setSubmitting(true);
     try {
-      const result = await createRun(prdData);
+      const result = await createRun(prdData, config);
       setLiveRunId(result.run_id);
       setLiveApiKey(result.api_key);
-      setTab('api');
+      setApiView('run');
     } catch (e) {
       alert((e as Error).message);
     } finally {
-      setCreating(false);
+      setSubmitting(false);
     }
   };
 
-  const showLiveRun = tab === 'api' && liveRunId;
+  const handleTabChange = (t: string) => {
+    setTab(t as Tab);
+    if (t === 'api') setApiView('docs');
+  };
 
   return (
     <div className="app">
@@ -80,7 +86,7 @@ export default function App() {
         onStop={handleStop}
         onReset={handleReset}
         tab={tab}
-        onTabChange={(t) => setTab(t as Tab)}
+        onTabChange={handleTabChange}
         hideControls={tab === 'api'}
       />
 
@@ -107,15 +113,29 @@ export default function App() {
           </>
         )}
 
-        {tab === 'api' && !showLiveRun && (
-          <ApiDocs onCreateDemo={handleCreateDemo} creating={creating} />
+        {tab === 'api' && apiView === 'docs' && (
+          <ApiDocs onOpenWizard={() => setApiView('wizard')} />
         )}
 
-        {showLiveRun && (
+        {tab === 'api' && apiView === 'wizard' && (
+          <div className="wizard-page">
+            <div className="wizard-page-header">
+              <button className="back-link" onClick={() => setApiView('docs')}>← API docs</button>
+              <h2 className="wizard-page-title">New run</h2>
+            </div>
+            <CreateRunWizard
+              stories={prdData.userStories}
+              onSubmit={handleWizardSubmit}
+              submitting={submitting}
+            />
+          </div>
+        )}
+
+        {tab === 'api' && apiView === 'run' && liveRunId && (
           <LiveRun
             runId={liveRunId}
             apiKey={liveApiKey}
-            onClear={() => { setLiveRunId(''); setLiveApiKey(''); }}
+            onClear={() => { setLiveRunId(''); setLiveApiKey(''); setApiView('docs'); }}
           />
         )}
       </main>
